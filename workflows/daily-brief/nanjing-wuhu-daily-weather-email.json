@@ -1,0 +1,255 @@
+{
+  "name": "南京、芜湖每日天气简报（邮箱）",
+  "id": "nanjing-wuhu-daily-weather-email",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "2a0d7dc8-ea71-4f51-b52f-22172b20b101",
+      "name": "手动测试",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1080, 160]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "03ba7ec9-fc16-4922-a172-2de7a632a102",
+      "name": "每天 07:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1080, -40]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "config-recipient",
+              "name": "recipientEmail",
+              "value": "={{ $env.WEATHER_RECIPIENT_EMAIL }}",
+              "type": "string"
+            },
+            {
+              "id": "config-from",
+              "name": "fromEmail",
+              "value": "={{ $env.WEATHER_FROM_EMAIL }}",
+              "type": "string"
+            },
+            {
+              "id": "config-ai",
+              "name": "useAi",
+              "value": "={{ ($env.WEATHER_USE_AI || 'false').toLowerCase() === 'true' }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9bdbe807-c919-4b88-82e2-a8859711a103",
+      "name": "运行配置",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-860, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $input.first().json;\nconst cities = [\n  { city: '南京', latitude: 32.0603, longitude: 118.7969 },\n  { city: '芜湖', latitude: 31.3525, longitude: 118.4331 },\n];\nreturn cities.map((city) => ({ json: { ...config, ...city } }));"
+      },
+      "id": "8a463bd5-07dd-4d2e-aa89-0f0235bfa104",
+      "name": "城市列表",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-640, 60]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "latitude", "value": "={{ $json.latitude }}" },
+            { "name": "longitude", "value": "={{ $json.longitude }}" },
+            { "name": "timezone", "value": "Asia/Shanghai" },
+            { "name": "forecast_days", "value": "2" },
+            { "name": "daily", "value": "weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,uv_index_max" },
+            { "name": "hourly", "value": "temperature_2m,apparent_temperature,precipitation_probability,weather_code,relative_humidity_2m,wind_speed_10m" }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "4585c100-a613-4456-b101-313bff07a105",
+      "name": "获取 Open-Meteo 预报",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-410, 60],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cities = $items('城市列表');\nconst responses = $input.all();\nreturn responses.map((item, index) => ({\n  json: {\n    city: cities[index]?.json?.city || `城市 ${index + 1}`,\n    latitude: cities[index]?.json?.latitude,\n    longitude: cities[index]?.json?.longitude,\n    recipientEmail: cities[index]?.json?.recipientEmail || '',\n    fromEmail: cities[index]?.json?.fromEmail || '',\n    useAi: Boolean(cities[index]?.json?.useAi),\n    weather: item.json,\n  },\n}));"
+      },
+      "id": "9194f5f9-41fb-41ce-af7e-042497478106",
+      "name": "关联城市与响应",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-180, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const weatherText = (code) => {\n  if (code === 0) return '晴';\n  if ([1, 2].includes(code)) return '晴间多云';\n  if (code === 3) return '阴';\n  if ([45, 48].includes(code)) return '雾';\n  if ([51, 53, 55, 56, 57].includes(code)) return '毛毛雨';\n  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '有雨';\n  if ([71, 73, 75, 77, 85, 86].includes(code)) return '有雪';\n  if ([95, 96, 99].includes(code)) return '雷雨';\n  return '天气情况未知';\n};\nconst round = (value) => Number.isFinite(Number(value)) ? Math.round(Number(value)) : null;\nconst items = $input.all();\nconst sections = [];\nconst cards = [];\nconst problems = [];\nfor (const item of items) {\n  const { city, weather } = item.json;\n  const daily = weather?.daily;\n  const hourly = weather?.hourly;\n  if (!daily?.time?.length || !hourly?.time?.length) {\n    problems.push(city);\n    sections.push(`【${city}】天气数据暂时不可用，请稍后查看。`);\n    cards.push({ city, available: false });\n    continue;\n  }\n  const date = daily.time[0];\n  const max = round(daily.temperature_2m_max?.[0]);\n  const min = round(daily.temperature_2m_min?.[0]);\n  const apparentMax = round(daily.apparent_temperature_max?.[0]);\n  const rainChance = round(daily.precipitation_probability_max?.[0]) ?? 0;\n  const rain = Number(daily.precipitation_sum?.[0] ?? 0);\n  const wind = round(daily.wind_speed_10m_max?.[0]) ?? 0;\n  const gust = round(daily.wind_gusts_10m_max?.[0]) ?? 0;\n  const uv = Number(daily.uv_index_max?.[0] ?? 0);\n  const condition = weatherText(daily.weather_code?.[0]);\n  const targetHours = ['09:00', '12:00', '15:00', '18:00', '21:00'];\n  const hourlyRows = targetHours.map((clock) => {\n    const index = hourly.time.indexOf(`${date}T${clock}`);\n    if (index < 0) return `${clock} 暂无数据`;\n    const temperature = round(hourly.temperature_2m?.[index]);\n    const feels = round(hourly.apparent_temperature?.[index]);\n    const probability = round(hourly.precipitation_probability?.[index]) ?? 0;\n    return `${clock} ${weatherText(hourly.weather_code?.[index])} ${temperature}℃（体感 ${feels}℃），降水 ${probability}%`;\n  });\n  const advice = [];\n  if (rainChance >= 50 || rain >= 1) advice.push('建议随身带伞，注意路面湿滑');\n  if (max !== null && max >= 35) advice.push('注意防暑补水，减少午后户外活动');\n  else if (max !== null && max >= 30) advice.push('午后偏热，注意补水防晒');\n  if (min !== null && min <= 10) advice.push('早晚偏凉，建议增加衣物');\n  if (gust >= 50 || wind >= 35) advice.push('风力较强，留意高空坠物并固定室外物品');\n  if (uv >= 6) advice.push('紫外线较强，外出做好防晒');\n  if (!advice.length) advice.push('天气整体平稳，按日常安排出行即可');\n  sections.push([\n    `【${city}】${condition}，${min}～${max}℃，最高体感 ${apparentMax}℃`,\n    `降水概率 ${rainChance}%，预计降水 ${rain.toFixed(1)} mm；最大风速 ${wind} km/h，阵风 ${gust} km/h；UV ${uv.toFixed(1)}`,\n    ...hourlyRows.map((row) => `- ${row}`),\n    `建议：${advice.join('；')}。`,\n  ].join('\\n'));\n  cards.push({ city, available: true, date, condition, min, max, apparentMax, rainChance, rain, wind, gust, uv, hourlyRows, advice });\n}\nconst date = cards.find((card) => card.available)?.date || new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });\nconst ruleSummary = `早上好，以下是 ${date} 南京与芜湖天气简报。\\n\\n${sections.join('\\n\\n')}\\n\\n数据来源：Open-Meteo。`;\nconst aiPrompt = `你是一名严谨、克制的中文天气编辑。请根据以下结构化天气内容，写一段适合晨间邮件开头的中文摘要。要求：1）不虚构数据；2）先说双城共同趋势，再指出差异；3）突出降雨、高温、大风等行动信息；4）80到140个汉字；5）只输出正文，不用标题。\\n\\n${ruleSummary}`;\nreturn [{ json: { date, cards, problems, ruleSummary, aiPrompt, recipientEmail: items[0]?.json?.recipientEmail || '', fromEmail: items[0]?.json?.fromEmail || '', useAi: Boolean(items[0]?.json?.useAi) } }];"
+      },
+      "id": "02a28af0-a808-477e-87f9-a0ef9aa8a107",
+      "name": "整理双城天气",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [50, 60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "use-ai-condition",
+              "leftValue": "={{ $json.useAi }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e50b5c50-465e-48a2-aa03-842d012cf108",
+      "name": "是否启用 AI",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [280, 60]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.aiPrompt }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "不得改变、补充或猜测输入中的任何气象数值。"
+            }
+          ]
+        }
+      },
+      "id": "4fa0d7d2-3efd-49ca-aa32-d7bdfbb62109",
+      "name": "AI 中文摘要",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [510, -60],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "gpt-4o-mini",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "a77a57fe-4eef-4052-8164-c41084881110",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [510, -270]
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $items('整理双城天气')[0].json;\nconst incoming = $input.first()?.json || {};\nconst aiText = typeof incoming.text === 'string' ? incoming.text.trim() : (typeof incoming.output === 'string' ? incoming.output.trim() : '');\nconst opening = aiText || '今日双城天气详情与出行建议如下，请结合降水、风力和体感温度合理安排出行。';\nconst escapeHtml = (value) => String(value).replace(/[&<>]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[character]);\nconst cardHtml = base.cards.map((card) => {\n  if (!card.available) return `<section style=\"padding:16px;margin:12px 0;border:1px solid #f0c36d;border-radius:12px;background:#fff8e1\"><h2 style=\"margin:0 0 8px\">${escapeHtml(card.city)}</h2><p>天气数据暂时不可用，请稍后查看。</p></section>`;\n  const hours = card.hourlyRows.map((row) => `<li style=\"margin:5px 0\">${escapeHtml(row)}</li>`).join('');\n  return `<section style=\"padding:18px;margin:14px 0;border:1px solid #dbe7f3;border-radius:12px;background:#f8fbff\"><h2 style=\"margin:0 0 10px;color:#174a7c\">${escapeHtml(card.city)} · ${escapeHtml(card.condition)}</h2><p style=\"font-size:20px;margin:8px 0\"><strong>${card.min}～${card.max}℃</strong> <span style=\"font-size:14px;color:#52606d\">最高体感 ${card.apparentMax}℃</span></p><p>降水概率 ${card.rainChance}% · 降水 ${card.rain.toFixed(1)} mm · 最大风速 ${card.wind} km/h · 阵风 ${card.gust} km/h · UV ${card.uv.toFixed(1)}</p><ul style=\"padding-left:22px\">${hours}</ul><p style=\"margin-bottom:0;color:#8a4b08\"><strong>建议：</strong>${escapeHtml(card.advice.join('；'))}。</p></section>`;\n}).join('');\nconst warning = base.problems.length ? `<p style=\"padding:10px;background:#fff3cd;border-radius:8px\">注意：${escapeHtml(base.problems.join('、'))}的数据本次获取失败。</p>` : '';\nconst html = `<div style=\"max-width:720px;margin:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;color:#243447;line-height:1.65\"><h1 style=\"color:#0b5f8a\">南京 · 芜湖每日天气简报</h1><p style=\"color:#52606d\">${escapeHtml(base.date)} · 中国标准时间</p><p style=\"font-size:16px\">${escapeHtml(opening)}</p>${warning}${cardHtml}<p style=\"margin-top:24px;font-size:12px;color:#7b8794\">天气数据来自 Open-Meteo；预报存在不确定性，请以当地官方预警为准。${aiText ? '摘要由 AI 辅助生成。' : '本次使用规则版摘要。'}</p></div>`;\nreturn [{ json: { toEmail: base.recipientEmail, fromEmail: base.fromEmail, subject: `南京·芜湖天气简报｜${base.date}`, html, usedAi: Boolean(aiText) } }];"
+      },
+      "id": "247de6ec-86fc-49de-91ab-e7920bd1b111",
+      "name": "生成邮件",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 60]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.fromEmail }}",
+        "toEmail": "={{ $json.toEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "a7526a7e-d846-4836-8c7b-07f804f71112",
+      "name": "发送天气邮件",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [980, 60]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "手动测试": {
+      "main": [[{ "node": "运行配置", "type": "main", "index": 0 }]]
+    },
+    "每天 07:30": {
+      "main": [[{ "node": "运行配置", "type": "main", "index": 0 }]]
+    },
+    "运行配置": {
+      "main": [[{ "node": "城市列表", "type": "main", "index": 0 }]]
+    },
+    "城市列表": {
+      "main": [[{ "node": "获取 Open-Meteo 预报", "type": "main", "index": 0 }]]
+    },
+    "获取 Open-Meteo 预报": {
+      "main": [[{ "node": "关联城市与响应", "type": "main", "index": 0 }]]
+    },
+    "关联城市与响应": {
+      "main": [[{ "node": "整理双城天气", "type": "main", "index": 0 }]]
+    },
+    "整理双城天气": {
+      "main": [[{ "node": "是否启用 AI", "type": "main", "index": 0 }]]
+    },
+    "是否启用 AI": {
+      "main": [
+        [{ "node": "AI 中文摘要", "type": "main", "index": 0 }],
+        [{ "node": "生成邮件", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [[{ "node": "AI 中文摘要", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "AI 中文摘要": {
+      "main": [[{ "node": "生成邮件", "type": "main", "index": 0 }]]
+    },
+    "生成邮件": {
+      "main": [[{ "node": "发送天气邮件", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai"
+  },
+  "versionId": "a643ae9e-e61d-4a43-a049-625477100113",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

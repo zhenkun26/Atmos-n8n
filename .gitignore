@@ -1,0 +1,10 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.n8n/
+node_modules/
+coverage/
+credentials*.json
+*.local.json
+.scratch/
