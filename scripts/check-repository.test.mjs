@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { validateWorkflow } from './check-repository.mjs';
 
 const validWorkflow = {
-  name: '边界测试',
+  name: 'Boundary Test',
   id: 'boundary-test',
   active: false,
   pinData: {},
@@ -10,21 +10,21 @@ const validWorkflow = {
   nodes: [
     {
       id: 'schedule-id',
-      name: '定时器',
+      name: 'Schedule',
       type: 'n8n-nodes-base.scheduleTrigger',
       parameters: {},
     },
     {
       id: 'request-id',
-      name: '天气请求',
+      name: 'Weather Request',
       type: 'n8n-nodes-base.httpRequest',
       parameters: { options: { timeout: 15000 } },
       onError: 'continueRegularOutput',
     },
   ],
   connections: {
-    定时器: {
-      main: [[{ node: '天气请求', type: 'main', index: 0 }]],
+    Schedule: {
+      main: [[{ node: 'Weather Request', type: 'main', index: 0 }]],
     },
   },
 };
@@ -32,26 +32,26 @@ const validWorkflow = {
 const asJson = (workflow) => JSON.stringify(workflow);
 const clone = () => structuredClone(validWorkflow);
 
-assert.equal(validateWorkflow('valid.json', asJson(clone())).name, '边界测试');
+assert.equal(validateWorkflow('valid.json', asJson(clone())).name, 'Boundary Test');
 
 const active = clone();
 active.active = true;
-assert.throws(() => validateWorkflow('active.json', asJson(active)), /active 必须为 false/);
+assert.throws(() => validateWorkflow('active.json', asJson(active)), /active must be false/);
 
 const credentialBound = clone();
 credentialBound.nodes[1].credentials = { headerAuth: { id: 'secret-id', name: 'secret' } };
-assert.throws(() => validateWorkflow('credentials.json', asJson(credentialBound)), /不得提交凭证绑定/);
+assert.throws(() => validateWorkflow('credentials.json', asJson(credentialBound)), /credential bindings must not be committed/);
 
 const brokenConnection = clone();
-brokenConnection.connections.定时器.main[0][0].node = '不存在的节点';
-assert.throws(() => validateWorkflow('broken.json', asJson(brokenConnection)), /连线目标节点不存在/);
+brokenConnection.connections.Schedule.main[0][0].node = 'Missing Node';
+assert.throws(() => validateWorkflow('broken.json', asJson(brokenConnection)), /connection target does not exist/);
 
 const noTimeout = clone();
 delete noTimeout.nodes[1].parameters.options.timeout;
-assert.throws(() => validateWorkflow('timeout.json', asJson(noTimeout)), /必须配置请求超时/);
+assert.throws(() => validateWorkflow('timeout.json', asJson(noTimeout)), /must configure a request timeout/);
 
 const noTimezone = clone();
 delete noTimezone.settings.timezone;
-assert.throws(() => validateWorkflow('timezone.json', asJson(noTimezone)), /必须声明时区/);
+assert.throws(() => validateWorkflow('timezone.json', asJson(noTimezone)), /must declare a timezone/);
 
-console.log('PASS: 仓库边界检查通过 1 个有效用例并拒绝 5 个违规用例。');
+console.log('PASS: Repository boundary checks accepted 1 valid case and rejected 5 invalid cases.');
