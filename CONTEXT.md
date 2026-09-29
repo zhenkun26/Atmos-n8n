@@ -6,7 +6,16 @@
 A scheduled, human-readable summary that helps a recipient plan near-term activity using weather information and actionable advice.
 
 **City forecast**
-The weather information for one configured city over the brief's reporting period.
+The weather information for one configured city over the brief's reporting period, with dates and hours expressed in that city's local timezone.
+
+**City timezone**
+The IANA timezone configured for a forecast location, such as `Asia/Shanghai` for Nanjing and Wuhu. It defines the local calendar date and clock hours used by that city's forecast.
+
+**Host timezone**
+The computer's timezone, currently `America/New_York`. It is distinct from a forecast location's timezone and a workflow's schedule timezone.
+
+**Schedule timezone**
+The timezone in which the daily trigger's clock time is interpreted. The current dual-city brief uses 07:30 `Asia/Shanghai`.
 
 **Dual-city brief**
 One weather brief that compares and reports exactly two city forecasts in a single delivery.

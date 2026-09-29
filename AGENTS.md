@@ -14,6 +14,13 @@
 - `docs/` explains architecture and durable decisions. `CONTEXT.md` is a glossary, not a design document.
 - Credentials, tokens, recipient addresses, execution data, and local n8n state never belong in Git.
 
+## Language and local time
+
+- Use English for code, workflow labels, prompts, delivery text, diagnostics, and documentation.
+- Keep each `README.md` bilingual in English and Simplified Chinese.
+- Keep the computer timezone (`America/New_York`) separate from workflow scheduling and city-local forecast time.
+- Use each city's IANA timezone for forecast requests and local-date calculations. The current daily brief remains scheduled at 07:30 `Asia/Shanghai`.
+
 ## Workflow invariants
 
 - Committed workflows are inactive and contain no credential bindings or pinned execution data.

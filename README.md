@@ -1,83 +1,163 @@
-# Atmos n8n 气象工作流
+# Atmos n8n Weather Workflows / 气象工作流
 
-这是一个以可审查 n8n JSON 为产品源的气象自动化仓库。当前交付南京、芜湖每日天气简报：每天按中国时区运行，生成中文概览、分时预报和生活建议，并通过 SMTP 邮箱发送。
+## English
 
-## 项目地图
+Atmos n8n treats reviewable, importable n8n JSON as the product source. Its current workflow delivers an English daily weather brief for Nanjing and Wuhu through SMTP email.
 
-- `workflows/`：可导入的 n8n 工作流产品，按简报类型分目录。
-- `scripts/`：不产生外部副作用的离线检查。
-- `docs/architecture.md`：模块 seam、安全边界和技术栈。
-- `docs/adr/`：少量、难以逆转的架构决策。
-- `CONTEXT.md`：气象简报领域的共享语言。
-- `AGENTS.md`：贡献与自动化代理约束。
+### Project map
 
-## 工作流文件
+- `workflows/`: importable workflows, grouped by brief family.
+- `scripts/`: offline checks without external API calls or notifications.
+- `docs/architecture.md`: module boundaries, time handling, security, and stack.
+- `docs/adr/`: durable architecture decisions.
+- `CONTEXT.md`: shared domain terminology.
+- `AGENTS.md`: contributor and automation rules.
 
-- `workflows/daily-brief/`：每日简报工作流目录。
-- `workflows/daily-brief/nanjing-wuhu-daily-weather-email.json`
+The current artifact is `workflows/daily-brief/nanjing-wuhu-daily-weather-email.json`.
 
-## 功能
+### Features
 
-- 每天 07:30（`Asia/Shanghai`）自动运行，也支持手动测试。
-- 使用 Open-Meteo 获取南京和芜湖天气；天气接口不需要 API Key。
-- 汇总最高/最低温、体感温度、降水概率、降水量、风速、紫外线和 09:00/12:00/15:00/18:00/21:00 分时预报。
-- 依据降水、高温、低温、大风和紫外线生成中文生活建议。
-- 可选使用 OpenAI Chat Model 润色为更自然的中文晨间摘要。
-- AI 未启用或调用失败时，仍使用规则版内容发送邮件。
-- 任一城市请求失败时，在邮件中明确显示该城市暂时不可用。
+- Runs daily at **07:30 Asia/Shanghai**, with manual and webhook triggers as well.
+- Retrieves Nanjing and Wuhu forecasts from Open-Meteo without a weather API key.
+- Reports daily temperatures, feels-like temperature, precipitation probability and amount, wind, gusts, UV, and forecasts for 09:00, 12:00, 15:00, 18:00, and 21:00 in each city's local time.
+- Produces deterministic English advice for rain, heat, cold, wind, and UV.
+- Optionally uses OpenAI to edit the English opening summary. AI is not required for a useful delivery.
+- Clearly identifies a city whose forecast could not be retrieved.
 
-## 导入与配置
+### Timezones
 
-1. 在 n8n 中选择 **Import from File**，导入工作流 JSON。
-2. 为“OpenAI Chat Model”选择 OpenAI 凭证（仅在启用 AI 时需要）。
-3. 为“发送天气邮件”选择 SMTP 凭证。
-4. 在 n8n 运行环境中配置：
+The computer timezone is **America/New_York**. The workflow explicitly retains **Asia/Shanghai** for its 07:30 schedule, independent of the computer or n8n instance timezone. Both configured cities use `Asia/Shanghai`.
+
+Each entry in `City List` has an IANA `timezone`. The weather request uses that value, and forecast dates and hours remain in the city's local time. If forecast data is unavailable, the date is calculated in that city's timezone. Cards display their local date and timezone; a brief spanning different local dates lists those dates. Do not use fixed UTC offsets, which cannot account for daylight saving time.
+
+### Import and configure
+
+1. Use **Import from File** in n8n to import the JSON.
+2. Configure an OpenAI credential on `OpenAI Chat Model` only if AI is enabled.
+3. Configure an SMTP credential on `Send Weather Email`.
+4. Supply runtime configuration in the n8n environment:
 
    ```dotenv
+   TZ=America/New_York
+   GENERIC_TIMEZONE=America/New_York
    WEATHER_RECIPIENT_EMAIL=your-address@example.com
    WEATHER_FROM_EMAIL=weather-bot@example.com
    WEATHER_USE_AI=false
    ```
 
-   n8n 2.x 默认可能禁止 Code/Set 节点读取环境变量；若继续使用上述配置，测试实例需要设置 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`。生产环境可改用 n8n Variables 或在“运行配置”节点中手动映射。
+   The timezone variables configure a self-hosted n8n process; they do not change the computer's timezone. The explicit workflow timezone still controls the schedule.
 
-   将 `WEATHER_USE_AI` 设为 `true` 后，工作流会调用 OpenAI；默认 `false` 使用免费、确定性的规则版摘要。
+   Environment access may be blocked in n8n 2.x. A disposable test instance using this export needs `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. In managed deployments, prefer n8n variables or credential-backed configuration and adapt `Runtime Configuration` inside the instance. Keep real addresses and credentials out of Git exports.
 
-   如果你的 n8n 禁止表达式读取环境变量，可直接在“运行配置”节点中填入收件地址、发件地址和 `useAi` 值。
+   Set `WEATHER_USE_AI=true` to enable OpenAI. The default `false` uses the deterministic summary without an AI call.
 
-5. 先运行“手动测试”触发器，检查两座城市的数据和邮件排版。
-6. 确认无误后启用工作流。
+5. Run `Manual Test` and inspect both cities and the email layout using test credentials.
+6. Activate the workflow only after runtime verification. Committed exports remain inactive.
 
-## 自定义
+### Triggers and customization
 
-- 修改时间：编辑“每天 07:30”节点。
-- 修改城市：编辑“城市列表”节点中的名称、纬度和经度。
-- 修改简报内容：编辑“整理双城天气”代码节点。
-- 修改 AI 风格：编辑“AI 中文摘要”节点中的提示词。
-- 修改邮件样式：编辑“生成邮件”代码节点。
+`Daily 07:30`, `Manual Test`, and `Run Once Webhook` all connect to `Runtime Configuration`. The webhook retains `GET /webhook/daily-brief/run` and returns the last node output. See [the daily brief guide](workflows/daily-brief/README.md) for operation and access controls.
 
-## 技术栈
+- Schedule: edit `Daily 07:30` and the workflow timezone together when changing its intended local time.
+- Cities: edit names, coordinates, and IANA timezones in `City List`; update fixed Nanjing/Wuhu headings if changing cities.
+- Brief: edit `Compose Dual-City Brief`.
+- AI style: edit the prompt in `AI English Summary` and the prompt text produced by `Compose Dual-City Brief`.
+- Email layout: edit `Compose Email`.
 
-- n8n 2.x：工作流编排与运行时。
-- Open-Meteo：只读天气预报数据。
-- OpenAI Chat Model：可选中文编辑增强。
-- SMTP：邮件交付。
-- Node.js 20+：零第三方依赖的离线契约测试。
-- GitHub Actions：运行与本地一致的检查命令。
+### Stack and offline checks
 
-详细取舍见 `docs/architecture.md` 和 `docs/adr/0001-workflow-json-is-the-product-source.md`。
-
-## 离线校验
+The stack is n8n 2.x, Open-Meteo, optional OpenAI, SMTP, Node.js 20+ standard-library checks, and GitHub Actions. See [the architecture](docs/architecture.md) and [ADR 0001](docs/adr/0001-workflow-json-is-the-product-source.md).
 
 ```bash
 npm run check
 ```
 
-校验不会访问天气接口、OpenAI 或 SMTP，也不会发送邮件。
+Checks do not contact weather APIs, OpenAI, or SMTP and do not send email. They include city-local date, hour-selection, and daylight-saving boundary fixtures. Code, workflow labels, messages, and documentation use English; `README.md` files provide English and Simplified Chinese sections.
 
-## 下一阶段
+### Runtime verification and future work
 
-1. 在一次性 n8n 环境完成 JSON 导入兼容性检查。
-2. 使用测试 SMTP 与 OpenAI 凭证完成端到端执行。
-3. 根据实际 n8n 部署方式决定手动导入、CLI 导入或 Git 环境同步。
-4. 只有出现第二个工作流并复用相同逻辑时，再评估自定义节点或共享包。
+1. Import into a disposable n8n instance to verify compatibility.
+2. Run end-to-end checks with test SMTP and optional OpenAI credentials before activation.
+3. Choose manual import, CLI import, or environment synchronization based on the actual deployment.
+4. Consider shared packages or custom nodes only when another workflow proves a reusable need.
+
+## 简体中文
+
+Atmos n8n 以可审查、可导入的 n8n JSON 为产品源。当前工作流为南京、芜湖生成英文每日天气简报，并通过 SMTP 邮件发送。
+
+### 项目地图
+
+- `workflows/`：按简报类型组织的可导入工作流。
+- `scripts/`：不调用外部 API、不发送通知的离线检查。
+- `docs/architecture.md`：模块边界、时间处理、安全与技术栈。
+- `docs/adr/`：持久化架构决策。
+- `CONTEXT.md`：共享领域术语。
+- `AGENTS.md`：贡献与自动化规则。
+
+当前工作流文件为 `workflows/daily-brief/nanjing-wuhu-daily-weather-email.json`。
+
+### 功能
+
+- 每天 **Asia/Shanghai 07:30** 执行，也支持手动与 webhook 触发。
+- 使用 Open-Meteo 获取南京、芜湖预报，无需天气 API Key。
+- 展示每日温度、体感温度、降水概率与总量、风速、阵风、紫外线，以及各城市当地 09:00、12:00、15:00、18:00、21:00 的预报。
+- 根据降雨、高温、低温、大风和紫外线生成确定性的英文建议。
+- 可选使用 OpenAI 润色英文开头摘要；有用的简报不依赖 AI。
+- 某个城市获取失败时，明确展示该城市的失败状态。
+
+### 时区
+
+电脑时区为 **America/New_York**。工作流明确使用 **Asia/Shanghai** 的 07:30 调度，不受电脑或 n8n 实例时区影响。当前两个城市均使用 `Asia/Shanghai`。
+
+`City List` 中每个城市都有 IANA `timezone`。天气请求使用该值，预报日期与小时保持为城市当地时间。预报不可用时，也按该城市时区计算日期。卡片展示当地日期与时区；若简报涉及不同当地日期，会列出这些日期。不要使用无法处理夏令时的固定 UTC 偏移。
+
+### 导入与配置
+
+1. 在 n8n 中使用 **Import from File** 导入 JSON。
+2. 仅在启用 AI 时为 `OpenAI Chat Model` 配置 OpenAI 凭据。
+3. 为 `Send Weather Email` 配置 SMTP 凭据。
+4. 在 n8n 环境中提供运行配置：
+
+   ```dotenv
+   TZ=America/New_York
+   GENERIC_TIMEZONE=America/New_York
+   WEATHER_RECIPIENT_EMAIL=your-address@example.com
+   WEATHER_FROM_EMAIL=weather-bot@example.com
+   WEATHER_USE_AI=false
+   ```
+
+   时区变量配置自托管的 n8n 进程，不会修改电脑时区。调度仍由工作流中明确设置的时区决定。
+
+   n8n 2.x 可能禁止读取环境变量。使用本导出的临时测试实例需要设置 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`。托管部署优先使用 n8n 变量或凭据配置，并在实例中调整 `Runtime Configuration`。真实地址与凭据不得进入 Git 导出。
+
+   设置 `WEATHER_USE_AI=true` 可启用 OpenAI；默认 `false` 使用确定性摘要，不调用 AI。
+
+5. 使用测试凭据运行 `Manual Test`，检查两座城市与邮件排版。
+6. 完成运行验证后再激活工作流。Git 中的导出保持 inactive。
+
+### 触发与自定义
+
+`Daily 07:30`、`Manual Test`、`Run Once Webhook` 均连接到 `Runtime Configuration`。Webhook 保留 `GET /webhook/daily-brief/run`，返回末节点输出。操作与访问控制见[每日简报指南](workflows/daily-brief/README.md)。
+
+- 调度：变更预期当地触发时间时，同时检查 `Daily 07:30` 和工作流时区。
+- 城市：修改 `City List` 的名称、坐标和 IANA 时区；更换城市时同步修改固定的南京、芜湖标题。
+- 简报：编辑 `Compose Dual-City Brief`。
+- AI 风格：编辑 `AI English Summary` 的提示词及 `Compose Dual-City Brief` 生成的提示文本。
+- 邮件排版：编辑 `Compose Email`。
+
+### 技术栈与离线检查
+
+使用 n8n 2.x、Open-Meteo、可选 OpenAI、SMTP、Node.js 20+ 标准库检查和 GitHub Actions。详见[架构文档](docs/architecture.md)与 [ADR 0001](docs/adr/0001-workflow-json-is-the-product-source.md)。
+
+```bash
+npm run check
+```
+
+检查不会访问天气 API、OpenAI 或 SMTP，也不会发送邮件；包含城市当地日期、小时选择和夏令时边界测试。代码、工作流标签、消息和文档使用英文；各 `README.md` 提供英文与简体中文内容。
+
+### 运行验证与后续工作
+
+1. 导入临时 n8n 实例，验证兼容性。
+2. 激活前使用测试 SMTP 和可选 OpenAI 凭据完成端到端检查。
+3. 根据实际部署方式选择手动导入、CLI 导入或环境同步。
+4. 仅在另一个工作流证明确有复用需求时考虑共享包或自定义节点。
